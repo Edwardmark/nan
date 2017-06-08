@@ -9,6 +9,12 @@ Today's goal:
 Design the neural network architecture based on mobilenet, which is light and good.
 
 Today's review:
-
+Get mobilenet inference written down.
+Found that with zero weight-decay, the mobilenet performance is relatively good.
+But with 1e-4 decay, the performance degenerate significantly. 
 
 Todo:
+Run the mobilenet in VGG-Face or WebFace.
+
+2017/05/25
+inference not run correctly, need bug fix!

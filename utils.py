@@ -123,16 +123,12 @@ def batch_norm(x, phase_train, scope='bn', affine=True):
     return normed
 
 ## define the custom convolutional layer,including conv,bias,relu,and regular term
-def cusConv(input_imgs, weight_shape, name, is_train, 
-	        stddev=None, need_dropout = False,
-            W_regular=0, need_relu = True, need_bn = False,
-            downsample = False, reuse=None):
+def cusConv(input_imgs, weight_shape, name, is_train,
+            need_dropout = False, need_bn = False, downsample = False, 
+            need_relu = True, W_regular=0, reuse=None):
     _stride = 2 if downsample else 1
-    if stddev is None:
-        print name, weight_shape
-        fan_in = np.prod(weight_shape[:3])
-        stddev = np.sqrt(2. / fan_in) #xavier initialization
-    with tf.name_scope(name) as scope: # using this tf.name_scope, can draw nice tensorboard graph,make sure it is using the same graph
+  
+    with tf.variable_scope(name, reuse=reuse) as scope: # using this tf.variable_scope, can draw nice tensorboard graph,make sure it is using the same graph
 
         weights = tf.Variable(
             tf.truncated_normal(weight_shape, dtype=tf.float32, stddev=stddev),
@@ -154,8 +150,7 @@ def cusConv(input_imgs, weight_shape, name, is_train,
             tmp_imgs = batch_norm(tmp_imgs, is_train)
         if need_relu:
             tmp_imgs = tf.nn.relu(tmp_imgs, name=scope)
-        if need_dropout:
-            tmp_imgs = tf.nn.dropout(tmp_imgs, keep_prob=0.618)
+ 
         param = [weights, biases]
     return tmp_imgs, param
 
@@ -185,7 +180,7 @@ def depth_sep_conv( input_imgs, weight_shape, name, is_train,
     print pwc_filter_shape
     pwc_stddev = np.sqrt(2. / np.prod(pwc_filter_shape[:3]))
 
-    with tf.name_scope(name) as scope: # using this tf.name_scope, can draw nice tensorboard graph,make sure it is using the same graph
+    with tf.variable_scope(name, reuse=reuse) as scope: # using this tf.variable_scope, can draw nice tensorboard graph,make sure it is using the same graph
 
         # first do depthwise convolution
         dwc_filter = tf.Variable(
@@ -234,29 +229,39 @@ def depth_sep_conv( input_imgs, weight_shape, name, is_train,
     return tmp_imgs, param
 
 ## define the custom fully connected layer
-def cusFc(input_imgs, weight_shape, name, is_train, need_bn = False,
-          need_relu=True, W_regular=0.0005, stddev=None, reuse=None):
-    if stddev is None:
-        stddev = np.sqrt(2. / weight_shape[0]) # xarvier initialization
-    with tf.name_scope(name) as scope:
-        fc_weights = tf.Variable(tf.truncated_normal(
-            weight_shape, stddev=stddev, dtype=tf.float32), name="weights")
-        fc_biases = tf.Variable(tf.constant(0.0, shape=[weight_shape[-1]],
-                                            dtype=tf.float32), name="biases")
+def fully_connected(x, num_out,
+                    is_train,
+                    W_regular = 0.0005,
+                    activation=tf.nn.relu,
+                    scope='fc',
+                    reuse=None):
+
+    shape = x.get_shape().as_list()
+
+    with tf.variable_scope(scope, reuse=reuse):
+
+        w = tf.get_variable(
+            'weights', [shape[1], num_out],
+            initializer=tf.contrib.layers.xavier_initializer(dtype=tf.float32))
+        b = tf.get_variable(
+            'biases', [num_out],
+            initializer=tf.constant_initializer(0.1))
+        fc = tf.matmul(x, w) + b
+
+        fc = activation(fc)
+
+        if is_train==True:
+        
+            fc = tf.nn.dropout(fc, 0.5)
+
         if W_regular > 0:
-            weight_decay = tf.nn.l2_loss(fc_weights) * W_regular
+            weight_decay = tf.nn.l2_loss(w) * W_regular # add normalization term
             tf.add_to_collection("losses", weight_decay)
 
-        fc = tf.add(tf.matmul(input_imgs, fc_weights), fc_biases, name="add")
+        param = [w, b]
 
-        if need_bn:
-        	fc = batch_norm(fc, is_train, name = "bn")
-        if need_relu:
-            fc = tf.nn.relu(fc,name = "relu")
-        if need_dropout:
-        	fc = tf.layers.dropout(fc, training = is_train, name = "dropout")
-        param = [fc_weights, fc_biases]
-    return fc, param
+        return fc, param
+
 
 def get_deconv_filter(f_shape):
     width = f_shape[0]
@@ -282,7 +287,7 @@ def _upscore_layer(bottom, shape,
                    num_classes, name,
                    ksize = 4, stride = 2):
     strides = [1, stride, stride, 1]
-    with tf.variable_scope(name):
+    with tf.variable_scope(name, reuse=reuse):
         in_features = bottom.get_shape()[3].value ## what is get_shape().val? get the out_channels of bottom
 
         if shape is None:
